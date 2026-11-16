@@ -20,6 +20,7 @@ Nothing else to install: FFmpeg is built in.
 On an Intel Mac, or any other system, run it from source with Python (below).
 
 ## How it works
+- **Drag and drop.** Drag a video onto the window, or click **Browse**.
 - **Hits the size, not just "smaller".** File size is bitrate × length, so the app works out the
   exact bitrate for your target. It then encodes in **two passes**: the first studies the video,
   the second spends the bits where the picture needs them. Results land a few percent under the
@@ -55,7 +56,8 @@ If a site's limit is different, pick **Custom**.
 ### Setup (one time)
 1. Install **Python 3.8+** from https://python.org. On Windows, tick **"Add Python to PATH"** during install.
 2. Run the app (see below). The first time, it asks **"Install FFmpeg?"** Click **Yes**. It downloads
-   `imageio-ffmpeg`, which includes FFmpeg (about 30 MB). You won't be asked again.
+   `imageio-ffmpeg`, which includes FFmpeg (about 30 MB), and `tkinterdnd2` for drag and drop.
+   You won't be asked again.
 
 ### Run
 ```
