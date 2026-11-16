@@ -1,0 +1,87 @@
+# Builds the downloadable apps and attaches them to a GitHub release.
+# Runs when a version tag is pushed:  git tag v1.0.1 && git push origin v1.0.1
+#
+# Each OS builds on its own runner because PyInstaller can't cross-compile:
+# a Mac app has to be built on a Mac.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:  # manual run from the Actions tab: builds only, no release
+
+permissions:
+  contents: write  # needed to create the release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: Video-Compressor-Windows.exe
+          - os: macos-latest  # Apple Silicon (M1 and newer)
+            asset: Video-Compressor-macOS.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Pinned to the versions the Windows build was tested with.
+      - run: python -m pip install pyinstaller==6.22.3 imageio-ffmpeg==0.8.1
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        # One file, no console window. --collect-data bundles imageio-ffmpeg's FFmpeg binary.
+        run: |
+          pyinstaller --noconfirm --onefile --windowed --name Video-Compressor --collect-data imageio_ffmpeg video_compressor.py
+          Move-Item dist/Video-Compressor.exe ${{ matrix.asset }}
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        # A .app bundle (one-dir: macOS apps are folders). ditto keeps the
+        # permissions and code signature that a plain zip would lose.
+        run: |
+          pyinstaller --noconfirm --windowed --name "Video Compressor" --collect-data imageio_ffmpeg video_compressor.py
+          ditto -c -k --keepParent "dist/Video Compressor.app" ${{ matrix.asset }}
+
+      # Smoke test: the app must start and still be running after 20 s
+      # (a missing module or library makes a frozen app quit at once).
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $p = Start-Process ./${{ matrix.asset }} -PassThru
+          Start-Sleep 20
+          if ($p.HasExited) { throw "App exited early with code $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+      - name: Smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          "dist/Video Compressor.app/Contents/MacOS/Video Compressor" &
+          pid=$!
+          sleep 20
+          kill -0 $pid || { echo "App exited early"; exit 1; }
+          kill $pid
+          find "dist/Video Compressor.app" -name 'ffmpeg-*' -perm -u+x | grep -q . || { echo "FFmpeg not bundled"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}" Video-Compressor-Windows.exe Video-Compressor-macOS.zip
+          --repo "${{ github.repository }}" --title "Video Compressor ${{ github.ref_name }}" --generate-notes
