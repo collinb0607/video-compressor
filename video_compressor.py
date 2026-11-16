@@ -43,6 +43,7 @@ MB = 1_000_000
 SIZE_SAFETY = 0.96   # aim 4% under the target for MP4 overhead and encoder error
 MAX_PASS2_RETRIES = 2
 MIN_VIDEO_BPS = 100_000  # below this H.264 is a smeared mess at any size
+SOURCE_CAP = 0.9  # never use more than 90% of the source's own bitrate
 
 RESOLUTIONS = ["Auto", "Original", "1080p", "720p", "480p", "360p", "240p"]
 AUTO_HEIGHTS = [2160, 1440, 1080, 720, 480, 360, 240]
@@ -142,10 +143,14 @@ def probe_video(ffmpeg, path):
     out = subprocess.run([ffmpeg, "-hide_banner", "-i", path],
                          capture_output=True, text=True, errors="replace",
                          **_POPEN_FLAGS).stderr
-    info = dict(duration=None, width=None, height=None, fps=None, has_audio=False, error=None)
+    info = dict(duration=None, width=None, height=None, fps=None, has_audio=False, bitrate=None,
+                error=None)
     m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", out)
     if m:
         info["duration"] = int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3])
+    m = re.search(r"Duration:.*?bitrate:\s*(\d+)\s*kb/s", out)  # whole file: video + sound
+    if m:
+        info["bitrate"] = int(m[1]) * 1000
     m = re.search(r"Stream #.*Video:.*?(\d{2,5})x(\d{2,5})", out)
     if m:
         info["width"], info["height"] = int(m[1]), int(m[2])
@@ -198,16 +203,28 @@ def scaled_size(src_w, src_h, short_side):
 
 
 def plan_encode(target_mb, duration, src_w, src_h, src_fps, has_audio, keep_audio,
-                res_choice="Auto", fps_choice="Auto"):
+                res_choice="Auto", fps_choice="Auto", src_bps=None):
     """Work out the bitrates, picture size and frame rate for a target file size.
 
     File size of a video is basically bitrate × duration, so we can compute the
-    bitrate exactly instead of guessing. Returns a dict, or raises ValueError
-    with a friendly message when the target is too small for the clip.
+    bitrate exactly instead of guessing. The target is a ceiling, not a goal:
+    we never use more bitrate than the source has (`src_bps`), because that only
+    makes the file bigger without looking any better. Returns a dict, or raises
+    ValueError with a friendly message when the target is too small for the clip.
     """
     budget_bps = target_mb * MB * 8 * SIZE_SAFETY / duration
     audio_bps = audio_bitrate(budget_bps) if (has_audio and keep_audio) else 0
     video_bps = int(budget_bps - audio_bps)
+    # 90%: re-encoding at the source's exact bitrate can come out a little BIGGER
+    # than the original; a bit under keeps "compress" true at almost no visible cost.
+    ceiling = src_bps * SOURCE_CAP - audio_bps if src_bps else None
+    capped = bool(ceiling) and video_bps > ceiling > MIN_VIDEO_BPS
+    if capped:
+        video_bps = int(ceiling)
+        # Plenty of room: Auto keeps the source's own size and frame rate,
+        # since shrinking them would only lose detail for no saving.
+        res_choice = "Original" if res_choice == "Auto" else res_choice
+        fps_choice = "Original" if fps_choice == "Auto" else fps_choice
     if video_bps < MIN_VIDEO_BPS:
         need_mb = (MIN_VIDEO_BPS + audio_bps) * duration / 8 / SIZE_SAFETY / MB
         raise ValueError(
@@ -251,7 +268,7 @@ def plan_encode(target_mb, duration, src_w, src_h, src_fps, has_audio, keep_audi
 
     return dict(video_bps=video_bps, audio_bps=audio_bps, width=width, height=height,
                 fps=fps, change_fps=abs(fps - src_fps) > 0.01,
-                bpp=bpp(width, height, fps))
+                bpp=bpp(width, height, fps), capped=capped)
 
 
 def fixed_size(src_w, src_h, res_choice):
@@ -519,7 +536,7 @@ class CompressorApp:
         i = self.info
         return start, duration, plan_encode(
             self._target_mb(), duration, i["width"], i["height"], i["fps"], i["has_audio"],
-            self.v["audio"].get(), self.v["res"].get(), self.v["fps"].get())
+            self.v["audio"].get(), self.v["res"].get(), self.v["fps"].get(), i["bitrate"])
 
     def _update_plan_label(self):
         """Show what the encode will be, live, so the user sees the trade-off."""
@@ -536,10 +553,15 @@ class CompressorApp:
                 f"{p['video_bps'] // 1000:,} kbps video"
                 + (f" + {p['audio_bps'] // 1000} kbps sound" if p["audio_bps"] else ", no sound")
                 + f" for {fmt_time(duration)}.")
-        if p["bpp"] < POOR_BPP:
+        if p["capped"]:
+            est = (p["video_bps"] + p["audio_bps"]) * duration / 8
+            text += (f"\nThis fits easily, so it stays close to the video's own quality: about "
+                     f"{fmt_size(est)}. Using more of the target wouldn't look any better.")
+        elif p["bpp"] < POOR_BPP:  # (when capped, quality is the source's own, not ours to warn about)
             text += ("\nQuality will be low at this size. A lower resolution, a shorter part, "
                      "or a bigger target will look better.")
-        self.plan_lbl.config(text=text, foreground="red" if p["bpp"] < POOR_BPP else "gray")
+        poor = p["bpp"] < POOR_BPP and not p["capped"]
+        self.plan_lbl.config(text=text, foreground="red" if poor else "gray")
 
     def pick_video(self):
         path = filedialog.askopenfilename(title="Choose a video", filetypes=VIDEO_TYPES)
@@ -640,10 +662,15 @@ class CompressorApp:
             return
         target_bytes = self._target_mb() * MB
         whole = start == 0 and abs(duration - self.info["duration"]) < 0.05
-        if whole and os.path.getsize(src) <= target_bytes and not messagebox.askyesno(
+        # For a part of the video, estimate its size from the file's average bitrate.
+        src_bytes = (os.path.getsize(src) if whole or not self.info["bitrate"]
+                     else self.info["bitrate"] * duration / 8)
+        if (whole or self.info["bitrate"]) and src_bytes <= target_bytes and not messagebox.askyesno(
                 "Already small enough",
-                f"This video is already {fmt_size(os.path.getsize(src))}, under the "
-                f"{fmt_size(target_bytes)} target.\n\nCompress it anyway?"):
+                f"{'This video is' if whole else 'This part of the video is about'} "
+                f"{fmt_size(src_bytes)}, already under the {fmt_size(target_bytes)} target.\n\n"
+                "Compress it anyway? It will only get a little smaller, because the app "
+                "keeps close to the video's own quality when there's room."):
             return
         if os.path.exists(dst) and not messagebox.askyesno(
                 "Overwrite?", f"{os.path.basename(dst)} already exists. Replace it?"):
