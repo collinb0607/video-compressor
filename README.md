@@ -24,6 +24,9 @@ On an Intel Mac, or any other system, run it from source with Python (below).
   exact bitrate for your target. It then encodes in **two passes**: the first studies the video,
   the second spends the bits where the picture needs them. Results land a few percent under the
   target. If one ever comes out over, the app re-encodes it lower automatically.
+- **Never makes a video bigger.** The target is a ceiling. If the video (or the part you
+  picked) already fits easily, the app stays close to its own quality instead of filling the
+  target, so a 3 MB clip doesn't turn into a 19 MB one.
 - **Picks a sensible resolution for you.** A 3-minute 1080p video squeezed into 20 MB would
   look blocky at full size, so **Auto** drops to the largest resolution and frame rate that
   still look clean at that bitrate (e.g. 720p, or 30 fps instead of 60). The **Output:** line
