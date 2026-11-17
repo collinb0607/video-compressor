@@ -80,6 +80,12 @@ install FFmpeg once more. The install dialog shows which Python it installs into
   in your temp folder. On Windows, paste `%TEMP%\video_compressor_errors.log` into File Explorer's
   address bar. On Mac, run `open $TMPDIR/video_compressor_errors.log`.
 
+## Support this project
+This app is free, with no ads, accounts or limits. If it saved you time or a subscription, you can
+support its development on Ko-fi:
+
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/collinbrooksdev)
+
 ## Part of the Offline Toolkit
 Also by me: [GIF Maker](https://github.com/collinb0607/gif-maker), which turns a video into a GIF,
 animated WebP, MP4 or WebM.
