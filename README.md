@@ -80,6 +80,9 @@ install FFmpeg once more. The install dialog shows which Python it installs into
   in your temp folder. On Windows, paste `%TEMP%\video_compressor_errors.log` into File Explorer's
   address bar. On Mac, run `open $TMPDIR/video_compressor_errors.log`.
 
+## Credits
+The icons are from [Lucide](https://lucide.dev) (ISC license, see [assets/LUCIDE-LICENSE.txt](assets/LUCIDE-LICENSE.txt)).
+
 ## Support this project
 This app is free, with no ads, accounts or limits. If it saved you time or a subscription, you can
 support its development on Ko-fi:
