@@ -2,7 +2,7 @@
 
 **Free, offline alternative to online video compressors. No upload limits, no watermark, no account.**
 
-![Video Compressor: pick a video, set 10 MB, click Compress, get a 9.77 MB file](docs/demo.gif)
+![Video Compressor: pick a video, set 10 MB, click Compress, get a 9.39 MB file](docs/demo.gif)
 
 Shrinks a video to fit a file-size limit, such as Discord's upload limit or an email
 attachment. Pick a size, click **Compress**, and the result lands just under it. Your video never
